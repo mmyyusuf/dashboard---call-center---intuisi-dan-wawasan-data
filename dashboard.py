@@ -30,8 +30,8 @@ st.markdown("""
     """, unsafe_allow_html=True)
 
 # ========== GANTI PATH FILE KAMU DI SINI ==========
-PATH_2024 = "LAPORAN INSIDEN CALL CENTER 112 TAHUN 2024.xlsx"  # Ganti dengan path file kamu
-PATH_2025 = "LAPORAN INSIDEN CALLCENTER 112 TAHUN 2025.xlsx"   # Ganti dengan path file kamu
+PATH_2024 = "LAPORAN INSIDEN CALL CENTER 112 TAHUN 2024.xlsx"
+PATH_2025 = "LAPORAN INSIDEN CALLCENTER 112 TAHUN 2025.xlsx"
 # ==================================================
 
 # Helper function untuk parsing durasi
@@ -102,14 +102,20 @@ def load_and_process_data(path_2024, path_2025):
                 df[c] = df[c].where(df[c].isna(), df[c].str.title())
         
         # Deteksi Ghost Call
-        df['is_ghost_label'] = df['KATEGORI'].str.lower().str.contains('ghost', na=False)
+        if 'KATEGORI' in df.columns:
+            df['is_ghost_label'] = df['KATEGORI'].str.lower().str.contains('ghost', na=False)
+        else:
+            df['is_ghost_label'] = False
         
-        df['is_ghost_auto'] = (
-            (df['duration_seconds'] == 0) &
-            (df['DESKRIPSI'].fillna('').str.len() < 5) &
-            (df['LATITUDE'].fillna(0) == 0) &
-            (df['LONGITUDE'].fillna(0) == 0)
-        )
+        if 'LATITUDE' in df.columns and 'LONGITUDE' in df.columns and 'DESKRIPSI' in df.columns:
+            df['is_ghost_auto'] = (
+                (df['duration_seconds'] == 0) &
+                (df['DESKRIPSI'].fillna('').str.len() < 5) &
+                (df['LATITUDE'].fillna(0) == 0) &
+                (df['LONGITUDE'].fillna(0) == 0)
+            )
+        else:
+            df['is_ghost_auto'] = False
         
         df['ghost_call'] = df['is_ghost_label'] | df['is_ghost_auto']
         
@@ -152,23 +158,43 @@ PATH_2025 = "C:/Users/NamaKamu/Documents/LAPORAN INSIDEN CALLCENTER 112 TAHUN 20
     # Filter kategori
     if 'KATEGORI' in df.columns:
         categories = sorted(df['KATEGORI'].dropna().unique())
-        selected_categories = st.sidebar.multiselect("Pilih Kategori", categories, default=categories)
+        selected_categories = st.sidebar.multiselect(
+            "Pilih Kategori", 
+            categories, 
+            default=categories,
+            help="Pilih satu atau lebih kategori. Kosongkan untuk memilih semua."
+        )
     else:
         selected_categories = []
     
     # Filter kecamatan
     if 'KECAMATAN' in df.columns:
         kecamatans = sorted(df['KECAMATAN'].dropna().unique())
-        selected_kecamatans = st.sidebar.multiselect("Pilih Kecamatan", kecamatans, default=kecamatans)
+        selected_kecamatans = st.sidebar.multiselect(
+            "Pilih Kecamatan", 
+            kecamatans, 
+            default=kecamatans,
+            help="Pilih satu atau lebih kecamatan. Kosongkan untuk memilih semua."
+        )
     else:
         selected_kecamatans = []
     
     # Apply filters
-    df_filtered = df[df['source'].isin(selected_years)]
-    if selected_categories:
+    df_filtered = df.copy()
+    
+    if selected_years:
+        df_filtered = df_filtered[df_filtered['source'].isin(selected_years)]
+    
+    if selected_categories and 'KATEGORI' in df.columns:
         df_filtered = df_filtered[df_filtered['KATEGORI'].isin(selected_categories)]
-    if selected_kecamatans:
+    
+    if selected_kecamatans and 'KECAMATAN' in df.columns:
         df_filtered = df_filtered[df_filtered['KECAMATAN'].isin(selected_kecamatans)]
+    
+    # Warning jika data kosong setelah filter
+    if len(df_filtered) == 0:
+        st.warning("⚠️ Tidak ada data yang sesuai dengan filter yang dipilih. Silakan ubah filter di sidebar.")
+        return
     
     # Tabs untuk navigasi
     tab1, tab2, tab3, tab4, tab5 = st.tabs([
@@ -214,23 +240,29 @@ PATH_2025 = "C:/Users/NamaKamu/Documents/LAPORAN INSIDEN CALLCENTER 112 TAHUN 20
             if 'KATEGORI' in df_filtered.columns:
                 category_counts = df_filtered['KATEGORI'].value_counts().head(10)
                 
-                fig, ax = plt.subplots(figsize=(10, 6))
-                category_counts.plot(kind='barh', ax=ax, color='steelblue')
-                ax.set_xlabel('Jumlah Laporan')
-                ax.set_ylabel('Kategori')
-                ax.set_title('Top 10 Kategori Laporan')
-                plt.tight_layout()
-                st.pyplot(fig)
+                if len(category_counts) > 0:
+                    fig, ax = plt.subplots(figsize=(10, 6))
+                    category_counts.plot(kind='barh', ax=ax, color='steelblue')
+                    ax.set_xlabel('Jumlah Laporan')
+                    ax.set_ylabel('Kategori')
+                    ax.set_title('Top 10 Kategori Laporan')
+                    plt.tight_layout()
+                    st.pyplot(fig)
+                else:
+                    st.info("Tidak ada data kategori untuk ditampilkan.")
         
         with col2:
             st.subheader("📊 Distribusi Berdasarkan Tipe Laporan")
             tipe_counts = df_filtered['TIPE LAPORAN'].value_counts().head(10)
             
-            fig, ax = plt.subplots(figsize=(10, 6))
-            colors = plt.cm.Set3(range(len(tipe_counts)))
-            ax.pie(tipe_counts.values, labels=tipe_counts.index, autopct='%1.1f%%', colors=colors)
-            ax.set_title('Top 10 Tipe Laporan')
-            st.pyplot(fig)
+            if len(tipe_counts) > 0:
+                fig, ax = plt.subplots(figsize=(10, 6))
+                colors = plt.cm.Set3(range(len(tipe_counts)))
+                ax.pie(tipe_counts.values, labels=tipe_counts.index, autopct='%1.1f%%', colors=colors)
+                ax.set_title('Top 10 Tipe Laporan')
+                st.pyplot(fig)
+            else:
+                st.info("Tidak ada data tipe laporan untuk ditampilkan.")
     
     # ==================== TAB 2: POLA WAKTU ====================
     with tab2:
@@ -242,17 +274,22 @@ PATH_2025 = "C:/Users/NamaKamu/Documents/LAPORAN INSIDEN CALLCENTER 112 TAHUN 20
         monthly_2024 = df[df['source'] == '2024']['ym'].value_counts().sort_index()
         monthly_2025 = df[df['source'] == '2025']['ym'].value_counts().sort_index()
         
-        fig, ax = plt.subplots(figsize=(14, 6))
-        ax.plot(monthly_2024.index.astype(str), monthly_2024.values, marker='o', label='2024', linewidth=2)
-        ax.plot(monthly_2025.index.astype(str), monthly_2025.values, marker='o', label='2025', linewidth=2)
-        ax.set_xlabel('Bulan')
-        ax.set_ylabel('Jumlah Laporan')
-        ax.set_title('Tren Laporan per Bulan (2024 vs 2025)')
-        ax.legend()
-        ax.grid(True, alpha=0.3)
-        plt.xticks(rotation=45)
-        plt.tight_layout()
-        st.pyplot(fig)
+        if len(monthly_2024) > 0 or len(monthly_2025) > 0:
+            fig, ax = plt.subplots(figsize=(14, 6))
+            if len(monthly_2024) > 0:
+                ax.plot(monthly_2024.index.astype(str), monthly_2024.values, marker='o', label='2024', linewidth=2)
+            if len(monthly_2025) > 0:
+                ax.plot(monthly_2025.index.astype(str), monthly_2025.values, marker='o', label='2025', linewidth=2)
+            ax.set_xlabel('Bulan')
+            ax.set_ylabel('Jumlah Laporan')
+            ax.set_title('Tren Laporan per Bulan (2024 vs 2025)')
+            ax.legend()
+            ax.grid(True, alpha=0.3)
+            plt.xticks(rotation=45)
+            plt.tight_layout()
+            st.pyplot(fig)
+        else:
+            st.info("Tidak ada data bulanan untuk ditampilkan.")
         
         st.markdown("---")
         
@@ -263,27 +300,33 @@ PATH_2025 = "C:/Users/NamaKamu/Documents/LAPORAN INSIDEN CALLCENTER 112 TAHUN 20
             st.subheader("🕐 Pola Jam (2024)")
             hourly_2024 = df[df['source'] == '2024']['hour'].value_counts().sort_index()
             
-            fig, ax = plt.subplots(figsize=(10, 6))
-            ax.plot(hourly_2024.index, hourly_2024.values, marker='o', linewidth=2, color='coral')
-            ax.set_xlabel('Jam (0-23)')
-            ax.set_ylabel('Jumlah Laporan')
-            ax.set_title('Pola Laporan per Jam - 2024')
-            ax.grid(True, alpha=0.3)
-            plt.tight_layout()
-            st.pyplot(fig)
+            if len(hourly_2024) > 0:
+                fig, ax = plt.subplots(figsize=(10, 6))
+                ax.plot(hourly_2024.index, hourly_2024.values, marker='o', linewidth=2, color='coral')
+                ax.set_xlabel('Jam (0-23)')
+                ax.set_ylabel('Jumlah Laporan')
+                ax.set_title('Pola Laporan per Jam - 2024')
+                ax.grid(True, alpha=0.3)
+                plt.tight_layout()
+                st.pyplot(fig)
+            else:
+                st.info("Tidak ada data jam untuk 2024.")
         
         with col2:
             st.subheader("🕐 Pola Jam (2025)")
             hourly_2025 = df[df['source'] == '2025']['hour'].value_counts().sort_index()
             
-            fig, ax = plt.subplots(figsize=(10, 6))
-            ax.plot(hourly_2025.index, hourly_2025.values, marker='o', linewidth=2, color='teal')
-            ax.set_xlabel('Jam (0-23)')
-            ax.set_ylabel('Jumlah Laporan')
-            ax.set_title('Pola Laporan per Jam - 2025')
-            ax.grid(True, alpha=0.3)
-            plt.tight_layout()
-            st.pyplot(fig)
+            if len(hourly_2025) > 0:
+                fig, ax = plt.subplots(figsize=(10, 6))
+                ax.plot(hourly_2025.index, hourly_2025.values, marker='o', linewidth=2, color='teal')
+                ax.set_xlabel('Jam (0-23)')
+                ax.set_ylabel('Jumlah Laporan')
+                ax.set_title('Pola Laporan per Jam - 2025')
+                ax.grid(True, alpha=0.3)
+                plt.tight_layout()
+                st.pyplot(fig)
+            else:
+                st.info("Tidak ada data jam untuk 2025.")
         
         st.markdown("---")
         
@@ -293,14 +336,17 @@ PATH_2025 = "C:/Users/NamaKamu/Documents/LAPORAN INSIDEN CALLCENTER 112 TAHUN 20
         weekday_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
         weekday_counts = df_filtered['weekday'].value_counts().reindex(weekday_order)
         
-        fig, ax = plt.subplots(figsize=(12, 6))
-        weekday_counts.plot(kind='bar', ax=ax, color='mediumpurple')
-        ax.set_xlabel('Hari')
-        ax.set_ylabel('Jumlah Laporan')
-        ax.set_title('Distribusi Laporan Berdasarkan Hari dalam Seminggu')
-        ax.set_xticklabels(weekday_counts.index, rotation=45)
-        plt.tight_layout()
-        st.pyplot(fig)
+        if len(weekday_counts.dropna()) > 0:
+            fig, ax = plt.subplots(figsize=(12, 6))
+            weekday_counts.plot(kind='bar', ax=ax, color='mediumpurple')
+            ax.set_xlabel('Hari')
+            ax.set_ylabel('Jumlah Laporan')
+            ax.set_title('Distribusi Laporan Berdasarkan Hari dalam Seminggu')
+            ax.set_xticklabels(weekday_counts.index, rotation=45)
+            plt.tight_layout()
+            st.pyplot(fig)
+        else:
+            st.info("Tidak ada data hari untuk ditampilkan.")
     
     # ==================== TAB 3: ANALISIS LOKASI ====================
     with tab3:
@@ -311,13 +357,16 @@ PATH_2025 = "C:/Users/NamaKamu/Documents/LAPORAN INSIDEN CALLCENTER 112 TAHUN 20
             
             kecamatan_counts = df_filtered['KECAMATAN'].value_counts().head(15)
             
-            fig, ax = plt.subplots(figsize=(12, 8))
-            kecamatan_counts.plot(kind='barh', ax=ax, color='seagreen')
-            ax.set_xlabel('Jumlah Laporan')
-            ax.set_ylabel('Kecamatan')
-            ax.set_title('Top 15 Kecamatan dengan Laporan Terbanyak')
-            plt.tight_layout()
-            st.pyplot(fig)
+            if len(kecamatan_counts) > 0:
+                fig, ax = plt.subplots(figsize=(12, 8))
+                kecamatan_counts.plot(kind='barh', ax=ax, color='seagreen')
+                ax.set_xlabel('Jumlah Laporan')
+                ax.set_ylabel('Kecamatan')
+                ax.set_title('Top 15 Kecamatan dengan Laporan Terbanyak')
+                plt.tight_layout()
+                st.pyplot(fig)
+            else:
+                st.info("Tidak ada data kecamatan untuk ditampilkan.")
             
             st.markdown("---")
             
@@ -340,14 +389,17 @@ PATH_2025 = "C:/Users/NamaKamu/Documents/LAPORAN INSIDEN CALLCENTER 112 TAHUN 20
         # Analisis Lokasi Palsu
         st.subheader("⚠️ Deteksi Lokasi Palsu")
         
-        fake_location = df_filtered[(df_filtered['LATITUDE'] == 0) & (df_filtered['LONGITUDE'] == 0)]
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            st.metric("Laporan dengan Lokasi Palsu", f"{len(fake_location):,}")
-        with col2:
-            fake_pct = (len(fake_location) / len(df_filtered) * 100) if len(df_filtered) > 0 else 0
-            st.metric("Persentase", f"{fake_pct:.2f}%")
+        if 'LATITUDE' in df_filtered.columns and 'LONGITUDE' in df_filtered.columns:
+            fake_location = df_filtered[(df_filtered['LATITUDE'] == 0) & (df_filtered['LONGITUDE'] == 0)]
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("Laporan dengan Lokasi Palsu", f"{len(fake_location):,}")
+            with col2:
+                fake_pct = (len(fake_location) / len(df_filtered) * 100) if len(df_filtered) > 0 else 0
+                st.metric("Persentase", f"{fake_pct:.2f}%")
+        else:
+            st.info("Data latitude/longitude tidak tersedia.")
     
     # ==================== TAB 4: GHOST & PRANK CALL ====================
     with tab4:
@@ -359,17 +411,22 @@ PATH_2025 = "C:/Users/NamaKamu/Documents/LAPORAN INSIDEN CALLCENTER 112 TAHUN 20
         ghost_monthly = df[df['ghost_call']].groupby('ym').size()
         prank_monthly = df[df['TIPE LAPORAN'].str.lower() == 'prank'].groupby('ym').size()
         
-        fig, ax = plt.subplots(figsize=(14, 6))
-        ax.plot(ghost_monthly.index.astype(str), ghost_monthly.values, marker='o', label='Ghost Call', linewidth=2)
-        ax.plot(prank_monthly.index.astype(str), prank_monthly.values, marker='o', label='Prank Call', linewidth=2)
-        ax.set_xlabel('Bulan')
-        ax.set_ylabel('Jumlah Laporan')
-        ax.set_title('Tren Ghost & Prank Call per Bulan (2024-2025)')
-        ax.legend()
-        ax.grid(True, alpha=0.3)
-        plt.xticks(rotation=45)
-        plt.tight_layout()
-        st.pyplot(fig)
+        if len(ghost_monthly) > 0 or len(prank_monthly) > 0:
+            fig, ax = plt.subplots(figsize=(14, 6))
+            if len(ghost_monthly) > 0:
+                ax.plot(ghost_monthly.index.astype(str), ghost_monthly.values, marker='o', label='Ghost Call', linewidth=2)
+            if len(prank_monthly) > 0:
+                ax.plot(prank_monthly.index.astype(str), prank_monthly.values, marker='o', label='Prank Call', linewidth=2)
+            ax.set_xlabel('Bulan')
+            ax.set_ylabel('Jumlah Laporan')
+            ax.set_title('Tren Ghost & Prank Call per Bulan (2024-2025)')
+            ax.legend()
+            ax.grid(True, alpha=0.3)
+            plt.xticks(rotation=45)
+            plt.tight_layout()
+            st.pyplot(fig)
+        else:
+            st.info("Tidak ada data ghost call atau prank call untuk ditampilkan.")
         
         st.markdown("---")
         
@@ -420,13 +477,16 @@ PATH_2025 = "C:/Users/NamaKamu/Documents/LAPORAN INSIDEN CALLCENTER 112 TAHUN 20
             
             agent_counts = df_filtered['AGENT L1'].value_counts().head(15)
             
-            fig, ax = plt.subplots(figsize=(12, 8))
-            agent_counts.plot(kind='barh', ax=ax, color='skyblue')
-            ax.set_xlabel('Jumlah Laporan')
-            ax.set_ylabel('Agent')
-            ax.set_title('Top 15 Agent dengan Laporan Terbanyak')
-            plt.tight_layout()
-            st.pyplot(fig)
+            if len(agent_counts) > 0:
+                fig, ax = plt.subplots(figsize=(12, 8))
+                agent_counts.plot(kind='barh', ax=ax, color='skyblue')
+                ax.set_xlabel('Jumlah Laporan')
+                ax.set_ylabel('Agent')
+                ax.set_title('Top 15 Agent dengan Laporan Terbanyak')
+                plt.tight_layout()
+                st.pyplot(fig)
+            else:
+                st.info("Tidak ada data agent untuk ditampilkan.")
             
             st.markdown("---")
             
@@ -437,27 +497,35 @@ PATH_2025 = "C:/Users/NamaKamu/Documents/LAPORAN INSIDEN CALLCENTER 112 TAHUN 20
                 st.subheader("👻 Top Agent Penangan Ghost Call")
                 ghost_by_agent = df_filtered[df_filtered['ghost_call']].groupby('AGENT L1').size().sort_values(ascending=False).head(10)
                 
-                fig, ax = plt.subplots(figsize=(10, 6))
-                ghost_by_agent.plot(kind='bar', ax=ax, color='lightcoral')
-                ax.set_xlabel('Agent')
-                ax.set_ylabel('Jumlah Ghost Call')
-                ax.set_title('Top 10 Agent Penangan Ghost Call')
-                plt.xticks(rotation=45, ha='right')
-                plt.tight_layout()
-                st.pyplot(fig)
+                if len(ghost_by_agent) > 0:
+                    fig, ax = plt.subplots(figsize=(10, 6))
+                    ghost_by_agent.plot(kind='bar', ax=ax, color='lightcoral')
+                    ax.set_xlabel('Agent')
+                    ax.set_ylabel('Jumlah Ghost Call')
+                    ax.set_title('Top 10 Agent Penangan Ghost Call')
+                    plt.xticks(rotation=45, ha='right')
+                    plt.tight_layout()
+                    st.pyplot(fig)
+                else:
+                    st.info("Tidak ada data ghost call untuk agent.")
             
             with col2:
                 st.subheader("😜 Top Agent Penangan Prank Call")
                 prank_by_agent = df_filtered[df_filtered['TIPE LAPORAN'].str.lower() == 'prank'].groupby('AGENT L1').size().sort_values(ascending=False).head(10)
                 
-                fig, ax = plt.subplots(figsize=(10, 6))
-                prank_by_agent.plot(kind='bar', ax=ax, color='lightsalmon')
-                ax.set_xlabel('Agent')
-                ax.set_ylabel('Jumlah Prank Call')
-                ax.set_title('Top 10 Agent Penangan Prank Call')
-                plt.xticks(rotation=45, ha='right')
-                plt.tight_layout()
-                st.pyplot(fig)
+                if len(prank_by_agent) > 0:
+                    fig, ax = plt.subplots(figsize=(10, 6))
+                    prank_by_agent.plot(kind='bar', ax=ax, color='lightsalmon')
+                    ax.set_xlabel('Agent')
+                    ax.set_ylabel('Jumlah Prank Call')
+                    ax.set_title('Top 10 Agent Penangan Prank Call')
+                    plt.xticks(rotation=45, ha='right')
+                    plt.tight_layout()
+                    st.pyplot(fig)
+                else:
+                    st.info("Tidak ada data prank call untuk agent.")
+        else:
+            st.info("Data agent tidak tersedia dalam dataset.")
     
     # Footer
     st.markdown("---")
