@@ -1,0 +1,472 @@
+import streamlit as st
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+import numpy as np
+import re
+from datetime import datetime
+
+# Page configuration
+st.set_page_config(
+    page_title="Dashboard Call Center 112",
+    page_icon="📞",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# Custom CSS
+st.markdown("""
+    <style>
+    .main {
+        padding: 0rem 1rem;
+    }
+    .metric-card {
+        background-color: #f0f2f6;
+        padding: 20px;
+        border-radius: 10px;
+        box-shadow: 2px 2px 5px rgba(0,0,0,0.1);
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+# ========== GANTI PATH FILE KAMU DI SINI ==========
+PATH_2024 = "LAPORAN INSIDEN CALL CENTER 112 TAHUN 2024.xlsx"  # Ganti dengan path file kamu
+PATH_2025 = "LAPORAN INSIDEN CALLCENTER 112 TAHUN 2025.xlsx"   # Ganti dengan path file kamu
+# ==================================================
+
+# Helper function untuk parsing durasi
+def parse_seconds(s):
+    if pd.isna(s):
+        return np.nan
+    s = str(s)
+    nums = re.findall(r'(\d+)', s)
+    if len(nums) >= 4:
+        days, hours, mins, secs = map(int, nums[:4])
+        return secs + mins*60 + hours*3600 + days*86400
+    if nums:
+        return int(nums[-1])
+    return np.nan
+
+# Cache data loading
+@st.cache_data
+def load_and_process_data(path_2024, path_2025):
+    """Load dan preprocess data dari 2 file Excel"""
+    
+    try:
+        # Load data
+        df24 = pd.read_excel(path_2024)
+        df25 = pd.read_excel(path_2025)
+        
+        # Tambah kolom source
+        df24['source'] = '2024'
+        df25['source'] = '2025'
+        
+        # Gabung dataset
+        df = pd.concat([df24, df25], ignore_index=True)
+        
+        # Bersihkan nama kolom
+        df.columns = [c.strip() for c in df.columns]
+        
+        # Konversi waktu lapor ke datetime
+        df['WAKTU LAPOR'] = pd.to_datetime(df['WAKTU LAPOR'], errors='coerce')
+        
+        # Buat fitur turunan dari waktu
+        df['date'] = df['WAKTU LAPOR'].dt.date
+        df['year'] = df['WAKTU LAPOR'].dt.year
+        df['month'] = df['WAKTU LAPOR'].dt.month
+        df['ym'] = df['WAKTU LAPOR'].dt.to_period('M')
+        df['day'] = df['WAKTU LAPOR'].dt.day
+        df['hour'] = df['WAKTU LAPOR'].dt.hour
+        df['weekday'] = df['WAKTU LAPOR'].dt.day_name()
+        
+        # Parse durasi pengerjaan
+        if 'DURASI PENGERJAAN' in df.columns:
+            df['duration_seconds'] = df['DURASI PENGERJAAN'].apply(parse_seconds)
+        else:
+            df['duration_seconds'] = np.nan
+        
+        # Identifikasi short call
+        df['short_call'] = df['duration_seconds'].fillna(999999) <= 5
+        
+        # Bersihkan tipe laporan
+        if 'TIPE LAPORAN' in df.columns:
+            df['TIPE LAPORAN'] = df['TIPE LAPORAN'].astype(str).str.strip().str.lower()
+        else:
+            df['TIPE LAPORAN'] = 'unknown'
+        
+        # Cleaning kecamatan & kelurahan
+        for c in ['KECAMATAN', 'KELURAHAN']:
+            if c in df.columns:
+                df[c] = df[c].astype(str).str.strip()
+                df[c] = df[c].replace({'-': pd.NA, 'nan': pd.NA, '': pd.NA})
+                df[c] = df[c].where(df[c].isna(), df[c].str.title())
+        
+        # Deteksi Ghost Call
+        df['is_ghost_label'] = df['KATEGORI'].str.lower().str.contains('ghost', na=False)
+        
+        df['is_ghost_auto'] = (
+            (df['duration_seconds'] == 0) &
+            (df['DESKRIPSI'].fillna('').str.len() < 5) &
+            (df['LATITUDE'].fillna(0) == 0) &
+            (df['LONGITUDE'].fillna(0) == 0)
+        )
+        
+        df['ghost_call'] = df['is_ghost_label'] | df['is_ghost_auto']
+        
+        return df, None
+    
+    except FileNotFoundError as e:
+        return None, f"File tidak ditemukan: {e}"
+    except Exception as e:
+        return None, f"Error saat memuat data: {e}"
+
+# Main app
+def main():
+    st.title("📞 Dashboard Analisis Call Center 112")
+    st.markdown("**Dashboard Interaktif untuk Mengeksplorasi Pola, Tren, dan Insight Data Laporan Call Center**")
+    st.markdown("---")
+    
+    # Load data otomatis
+    with st.spinner('⏳ Memuat dan memproses data...'):
+        df, error = load_and_process_data(PATH_2024, PATH_2025)
+    
+    if error:
+        st.error(f"❌ {error}")
+        st.info("💡 **Cara memperbaiki:**\n1. Pastikan file Excel sudah ada di folder yang sama dengan file Python ini\n2. Atau ubah PATH_2024 dan PATH_2025 di baris 25-26 dengan path lengkap file kamu")
+        st.code("""
+# Contoh path lengkap:
+PATH_2024 = "C:/Users/NamaKamu/Documents/LAPORAN INSIDEN CALL CENTER 112 TAHUN 2024.xlsx"
+PATH_2025 = "C:/Users/NamaKamu/Documents/LAPORAN INSIDEN CALLCENTER 112 TAHUN 2025.xlsx"
+        """)
+        return
+    
+    st.success(f"✅ Data berhasil dimuat! Total: {len(df):,} laporan")
+    
+    # Sidebar - Filters
+    st.sidebar.header("🔍 Filter Data")
+    
+    # Filter tahun
+    years = sorted(df['source'].unique())
+    selected_years = st.sidebar.multiselect("Pilih Tahun", years, default=years)
+    
+    # Filter kategori
+    if 'KATEGORI' in df.columns:
+        categories = sorted(df['KATEGORI'].dropna().unique())
+        selected_categories = st.sidebar.multiselect("Pilih Kategori", categories, default=categories)
+    else:
+        selected_categories = []
+    
+    # Filter kecamatan
+    if 'KECAMATAN' in df.columns:
+        kecamatans = sorted(df['KECAMATAN'].dropna().unique())
+        selected_kecamatans = st.sidebar.multiselect("Pilih Kecamatan", kecamatans, default=kecamatans)
+    else:
+        selected_kecamatans = []
+    
+    # Apply filters
+    df_filtered = df[df['source'].isin(selected_years)]
+    if selected_categories:
+        df_filtered = df_filtered[df_filtered['KATEGORI'].isin(selected_categories)]
+    if selected_kecamatans:
+        df_filtered = df_filtered[df_filtered['KECAMATAN'].isin(selected_kecamatans)]
+    
+    # Tabs untuk navigasi
+    tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        "📊 Overview", 
+        "📈 Pola Waktu", 
+        "📍 Analisis Lokasi", 
+        "⚠️ Ghost & Prank Call",
+        "👤 Analisis Agent"
+    ])
+    
+    # ==================== TAB 1: OVERVIEW ====================
+    with tab1:
+        st.header("📊 Overview Data Call Center")
+        
+        # Key Metrics
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            st.metric("Total Laporan", f"{len(df_filtered):,}")
+        
+        with col2:
+            ghost_count = df_filtered['ghost_call'].sum()
+            ghost_pct = (ghost_count / len(df_filtered) * 100) if len(df_filtered) > 0 else 0
+            st.metric("Ghost Calls", f"{ghost_count:,}", f"{ghost_pct:.1f}%")
+        
+        with col3:
+            prank_count = (df_filtered['TIPE LAPORAN'].str.lower() == 'prank').sum()
+            prank_pct = (prank_count / len(df_filtered) * 100) if len(df_filtered) > 0 else 0
+            st.metric("Prank Calls", f"{prank_count:,}", f"{prank_pct:.1f}%")
+        
+        with col4:
+            short_count = df_filtered['short_call'].sum()
+            short_pct = (short_count / len(df_filtered) * 100) if len(df_filtered) > 0 else 0
+            st.metric("Short Calls (≤5s)", f"{short_count:,}", f"{short_pct:.1f}%")
+        
+        st.markdown("---")
+        
+        # Distribusi Kategori
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.subheader("📋 Distribusi Berdasarkan Kategori")
+            if 'KATEGORI' in df_filtered.columns:
+                category_counts = df_filtered['KATEGORI'].value_counts().head(10)
+                
+                fig, ax = plt.subplots(figsize=(10, 6))
+                category_counts.plot(kind='barh', ax=ax, color='steelblue')
+                ax.set_xlabel('Jumlah Laporan')
+                ax.set_ylabel('Kategori')
+                ax.set_title('Top 10 Kategori Laporan')
+                plt.tight_layout()
+                st.pyplot(fig)
+        
+        with col2:
+            st.subheader("📊 Distribusi Berdasarkan Tipe Laporan")
+            tipe_counts = df_filtered['TIPE LAPORAN'].value_counts().head(10)
+            
+            fig, ax = plt.subplots(figsize=(10, 6))
+            colors = plt.cm.Set3(range(len(tipe_counts)))
+            ax.pie(tipe_counts.values, labels=tipe_counts.index, autopct='%1.1f%%', colors=colors)
+            ax.set_title('Top 10 Tipe Laporan')
+            st.pyplot(fig)
+    
+    # ==================== TAB 2: POLA WAKTU ====================
+    with tab2:
+        st.header("📈 Analisis Pola Waktu")
+        
+        # Pola Bulanan
+        st.subheader("📅 Pola Bulanan (2024 vs 2025)")
+        
+        monthly_2024 = df[df['source'] == '2024']['ym'].value_counts().sort_index()
+        monthly_2025 = df[df['source'] == '2025']['ym'].value_counts().sort_index()
+        
+        fig, ax = plt.subplots(figsize=(14, 6))
+        ax.plot(monthly_2024.index.astype(str), monthly_2024.values, marker='o', label='2024', linewidth=2)
+        ax.plot(monthly_2025.index.astype(str), monthly_2025.values, marker='o', label='2025', linewidth=2)
+        ax.set_xlabel('Bulan')
+        ax.set_ylabel('Jumlah Laporan')
+        ax.set_title('Tren Laporan per Bulan (2024 vs 2025)')
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+        plt.xticks(rotation=45)
+        plt.tight_layout()
+        st.pyplot(fig)
+        
+        st.markdown("---")
+        
+        # Pola Jam
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.subheader("🕐 Pola Jam (2024)")
+            hourly_2024 = df[df['source'] == '2024']['hour'].value_counts().sort_index()
+            
+            fig, ax = plt.subplots(figsize=(10, 6))
+            ax.plot(hourly_2024.index, hourly_2024.values, marker='o', linewidth=2, color='coral')
+            ax.set_xlabel('Jam (0-23)')
+            ax.set_ylabel('Jumlah Laporan')
+            ax.set_title('Pola Laporan per Jam - 2024')
+            ax.grid(True, alpha=0.3)
+            plt.tight_layout()
+            st.pyplot(fig)
+        
+        with col2:
+            st.subheader("🕐 Pola Jam (2025)")
+            hourly_2025 = df[df['source'] == '2025']['hour'].value_counts().sort_index()
+            
+            fig, ax = plt.subplots(figsize=(10, 6))
+            ax.plot(hourly_2025.index, hourly_2025.values, marker='o', linewidth=2, color='teal')
+            ax.set_xlabel('Jam (0-23)')
+            ax.set_ylabel('Jumlah Laporan')
+            ax.set_title('Pola Laporan per Jam - 2025')
+            ax.grid(True, alpha=0.3)
+            plt.tight_layout()
+            st.pyplot(fig)
+        
+        st.markdown("---")
+        
+        # Pola Hari dalam Seminggu
+        st.subheader("📆 Pola Berdasarkan Hari dalam Seminggu")
+        
+        weekday_order = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
+        weekday_counts = df_filtered['weekday'].value_counts().reindex(weekday_order)
+        
+        fig, ax = plt.subplots(figsize=(12, 6))
+        weekday_counts.plot(kind='bar', ax=ax, color='mediumpurple')
+        ax.set_xlabel('Hari')
+        ax.set_ylabel('Jumlah Laporan')
+        ax.set_title('Distribusi Laporan Berdasarkan Hari dalam Seminggu')
+        ax.set_xticklabels(weekday_counts.index, rotation=45)
+        plt.tight_layout()
+        st.pyplot(fig)
+    
+    # ==================== TAB 3: ANALISIS LOKASI ====================
+    with tab3:
+        st.header("📍 Analisis Berdasarkan Lokasi")
+        
+        if 'KECAMATAN' in df_filtered.columns:
+            st.subheader("🗺️ Top 15 Kecamatan dengan Laporan Terbanyak")
+            
+            kecamatan_counts = df_filtered['KECAMATAN'].value_counts().head(15)
+            
+            fig, ax = plt.subplots(figsize=(12, 8))
+            kecamatan_counts.plot(kind='barh', ax=ax, color='seagreen')
+            ax.set_xlabel('Jumlah Laporan')
+            ax.set_ylabel('Kecamatan')
+            ax.set_title('Top 15 Kecamatan dengan Laporan Terbanyak')
+            plt.tight_layout()
+            st.pyplot(fig)
+            
+            st.markdown("---")
+            
+            # Tabel Detail per Kecamatan
+            st.subheader("📋 Detail Laporan per Kecamatan")
+            kecamatan_detail = df_filtered.groupby('KECAMATAN').agg({
+                'UID': 'count',
+                'ghost_call': 'sum',
+                'short_call': 'sum'
+            }).rename(columns={
+                'UID': 'Total Laporan',
+                'ghost_call': 'Ghost Calls',
+                'short_call': 'Short Calls'
+            }).sort_values('Total Laporan', ascending=False).head(20)
+            
+            st.dataframe(kecamatan_detail, use_container_width=True)
+        
+        st.markdown("---")
+        
+        # Analisis Lokasi Palsu
+        st.subheader("⚠️ Deteksi Lokasi Palsu")
+        
+        fake_location = df_filtered[(df_filtered['LATITUDE'] == 0) & (df_filtered['LONGITUDE'] == 0)]
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            st.metric("Laporan dengan Lokasi Palsu", f"{len(fake_location):,}")
+        with col2:
+            fake_pct = (len(fake_location) / len(df_filtered) * 100) if len(df_filtered) > 0 else 0
+            st.metric("Persentase", f"{fake_pct:.2f}%")
+    
+    # ==================== TAB 4: GHOST & PRANK CALL ====================
+    with tab4:
+        st.header("⚠️ Analisis Ghost Call & Prank Call")
+        
+        # Tren Ghost & Prank Call
+        st.subheader("📉 Tren Ghost & Prank Call per Bulan")
+        
+        ghost_monthly = df[df['ghost_call']].groupby('ym').size()
+        prank_monthly = df[df['TIPE LAPORAN'].str.lower() == 'prank'].groupby('ym').size()
+        
+        fig, ax = plt.subplots(figsize=(14, 6))
+        ax.plot(ghost_monthly.index.astype(str), ghost_monthly.values, marker='o', label='Ghost Call', linewidth=2)
+        ax.plot(prank_monthly.index.astype(str), prank_monthly.values, marker='o', label='Prank Call', linewidth=2)
+        ax.set_xlabel('Bulan')
+        ax.set_ylabel('Jumlah Laporan')
+        ax.set_title('Tren Ghost & Prank Call per Bulan (2024-2025)')
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+        plt.xticks(rotation=45)
+        plt.tight_layout()
+        st.pyplot(fig)
+        
+        st.markdown("---")
+        
+        # Insight & Rekomendasi
+        st.subheader("💡 Insight & Rekomendasi")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.markdown("**🔍 Kemungkinan Penyebab:**")
+            st.markdown("""
+            - **Ghost Call:**
+              - Panggilan terputus otomatis sebelum terjawab
+              - Masalah koneksi jaringan pelapor
+              - Sistem auto-dial yang error
+              - Pocket dial (panggilan tidak sengaja)
+            
+            - **Prank Call:**
+              - Ketidaktahuan masyarakat tentang fungsi 112
+              - Iseng/kurang kesadaran akan urgensi layanan
+              - Testing sistem tanpa tujuan jelas
+            """)
+        
+        with col2:
+            st.markdown("**✅ Rekomendasi Solusi:**")
+            st.markdown("""
+            - **Edukasi & Sosialisasi:**
+              - Kampanye media sosial tentang penggunaan 112
+              - Kolaborasi dengan sekolah untuk edukasi dini
+              
+            - **Teknologi:**
+              - Implementasi sistem deteksi pola panggilan berulang
+              - Auto-blocking untuk nomor yang terdeteksi spam
+              - Verifikasi lokasi GPS otomatis
+              
+            - **Operasional:**
+              - Pelatihan agent untuk identifikasi cepat
+              - SOP khusus penanganan ghost/prank call
+              - Dashboard monitoring real-time
+            """)
+    
+    # ==================== TAB 5: ANALISIS AGENT ====================
+    with tab5:
+        st.header("👤 Analisis Performa Agent")
+        
+        if 'AGENT L1' in df_filtered.columns:
+            st.subheader("🏆 Top Agent Berdasarkan Jumlah Laporan Ditangani")
+            
+            agent_counts = df_filtered['AGENT L1'].value_counts().head(15)
+            
+            fig, ax = plt.subplots(figsize=(12, 8))
+            agent_counts.plot(kind='barh', ax=ax, color='skyblue')
+            ax.set_xlabel('Jumlah Laporan')
+            ax.set_ylabel('Agent')
+            ax.set_title('Top 15 Agent dengan Laporan Terbanyak')
+            plt.tight_layout()
+            st.pyplot(fig)
+            
+            st.markdown("---")
+            
+            # Ghost & Prank per Agent
+            col1, col2 = st.columns(2)
+            
+            with col1:
+                st.subheader("👻 Top Agent Penangan Ghost Call")
+                ghost_by_agent = df_filtered[df_filtered['ghost_call']].groupby('AGENT L1').size().sort_values(ascending=False).head(10)
+                
+                fig, ax = plt.subplots(figsize=(10, 6))
+                ghost_by_agent.plot(kind='bar', ax=ax, color='lightcoral')
+                ax.set_xlabel('Agent')
+                ax.set_ylabel('Jumlah Ghost Call')
+                ax.set_title('Top 10 Agent Penangan Ghost Call')
+                plt.xticks(rotation=45, ha='right')
+                plt.tight_layout()
+                st.pyplot(fig)
+            
+            with col2:
+                st.subheader("😜 Top Agent Penangan Prank Call")
+                prank_by_agent = df_filtered[df_filtered['TIPE LAPORAN'].str.lower() == 'prank'].groupby('AGENT L1').size().sort_values(ascending=False).head(10)
+                
+                fig, ax = plt.subplots(figsize=(10, 6))
+                prank_by_agent.plot(kind='bar', ax=ax, color='lightsalmon')
+                ax.set_xlabel('Agent')
+                ax.set_ylabel('Jumlah Prank Call')
+                ax.set_title('Top 10 Agent Penangan Prank Call')
+                plt.xticks(rotation=45, ha='right')
+                plt.tight_layout()
+                st.pyplot(fig)
+    
+    # Footer
+    st.markdown("---")
+    st.markdown("""
+    <div style='text-align: center; color: gray;'>
+    <p>Dashboard Call Center 112 | Intuisi dan Wawasan Data</p>
+    <p>Developed with Streamlit 🎈</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+if __name__ == "__main__":
+    main()
