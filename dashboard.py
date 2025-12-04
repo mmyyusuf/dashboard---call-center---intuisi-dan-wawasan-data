@@ -29,10 +29,10 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# ========== GANTI PATH FILE KAMU DI SINI ==========
-PATH_2024 = "LAPORAN INSIDEN CALL CENTER 112 TAHUN 2024.xlsx"
-PATH_2025 = "LAPORAN INSIDEN CALLCENTER 112 TAHUN 2025.xlsx"
-# ==================================================
+# ========== PATH FILE ==========
+PATH_2024 = "data_2024.xlsx"
+PATH_2025 = "data_2025.xlsx"
+# ===============================
 
 # Helper function untuk parsing durasi
 def parse_seconds(s):
@@ -464,7 +464,7 @@ def main():
                 'fake_location': 'Lokasi Palsu'
             }).sort_values('Total Laporan', ascending=False).head(20)
             
-            st.dataframe(kecamatan_detail, use_container_width=True)
+            st.dataframe(kecamatan_detail, width="stretch")
         
         st.markdown("---")
         
@@ -606,6 +606,6 @@ def main():
                     st.pyplot(fig)
                     
                     # Tabel detail
-                    st.dataframe(ghost_by_agent.reset_index().rename(columns={'AGENT L1': 'Agent', 0: 'Jumlah Ghost Call'}), use_container_width=True)
+                    st.dataframe(ghost_by_agent.reset_index().rename(columns={'AGENT L1': 'Agent', 0: 'Jumlah Ghost Call'}), width="stretch")
                 else:
                     st.info("Tidak ada data ghost call untuk agent.")
