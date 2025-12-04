@@ -42,7 +42,6 @@ def parse_seconds(s):
     # Coba parsing format "0 Hari : 0 Jam : 0 Menit : 0 Detik"
     # jika menemukan label hari/jam/menit/detik, gunakan itu
     try:
-        # cari pattern seperti "0 Hari", "0 Jam", "0 Menit", "0 Detik"
         days = hours = mins = secs = 0
         m_days = re.search(r'(\d+)\s*Hari', s, flags=re.IGNORECASE)
         m_hours = re.search(r'(\d+)\s*Jam', s, flags=re.IGNORECASE)
@@ -56,10 +55,8 @@ def parse_seconds(s):
             mins = int(m_mins.group(1))
         if m_secs:
             secs = int(m_secs.group(1))
-        # if we matched any label, return computed seconds
         if any([m_days, m_hours, m_mins, m_secs]):
             return secs + mins*60 + hours*3600 + days*86400
-        # fallback: take numbers present, common case last number is seconds or total seconds
         nums = re.findall(r'(\d+)', s)
         if len(nums) >= 4:
             days, hours, mins, secs = map(int, nums[:4])
@@ -70,14 +67,26 @@ def parse_seconds(s):
         pass
     return np.nan
 
+# robust helper to read excel trying engines
+def read_excel_file(path):
+    """Try to read excel using openpyxl first, fallback to pandas default"""
+    try:
+        return pd.read_excel(path, engine="openpyxl")
+    except Exception as e1:
+        try:
+            return pd.read_excel(path)
+        except Exception as e2:
+            # raise combined error to be caught by caller
+            raise Exception(f"Failed to read '{path}'. Tries:\n - openpyxl error: {e1}\n - default engine error: {e2}")
+
 # Cache data loading
 @st.cache_data
 def load_and_process_data(path_2024, path_2025):
-    """Load dan preprocess data dari 2 file Excel"""
+    """Load dan preprocess data dari 2 file Excel (robust reading + cleaning)"""
     try:
-        # Load data
-        df24 = pd.read_excel(path_2024)
-        df25 = pd.read_excel(path_2025)
+        # Load data (robust)
+        df24 = read_excel_file(path_2024)
+        df25 = read_excel_file(path_2025)
 
         # Tambah kolom source
         df24['source'] = '2024'
@@ -89,7 +98,7 @@ def load_and_process_data(path_2024, path_2025):
         # Bersihkan nama kolom
         df.columns = [c.strip() for c in df.columns]
 
-        # Konversi waktu lapor ke datetime
+        # Konversi waktu lapor ke datetime (jika ada)
         if 'WAKTU LAPOR' in df.columns:
             df['WAKTU LAPOR'] = pd.to_datetime(df['WAKTU LAPOR'], errors='coerce')
         else:
@@ -113,9 +122,8 @@ def load_and_process_data(path_2024, path_2025):
         # Identifikasi short call (durasi <= 5 detik)
         df['short_call'] = (df['duration_seconds'] <= 5) & (df['duration_seconds'].notna())
 
-        # Bersihkan tipe laporan
+        # Bersihkan tipe laporan (jaga string asli)
         if 'TIPE LAPORAN' in df.columns:
-            # convert to string and lower, but keep original values in case
             df['TIPE LAPORAN'] = df['TIPE LAPORAN'].astype(str).str.strip()
         else:
             df['TIPE LAPORAN'] = 'unknown'
@@ -152,7 +160,6 @@ def load_and_process_data(path_2024, path_2025):
         df['ghost_call'] = df['is_ghost_label'] | df['is_ghost_auto']
 
         # === DETEKSI PRANK CALL ===
-        # treat 'prank' in TIPE LAPORAN (case-insensitive)
         df['prank_call'] = df['TIPE LAPORAN'].astype(str).str.lower() == 'prank'
 
         # === DETEKSI LOKASI PALSU ===
@@ -162,29 +169,26 @@ def load_and_process_data(path_2024, path_2025):
 
         # === DETEKSI SPAM BERULANG ===
         df_sorted = df.sort_values('WAKTU LAPOR').copy()
-        # if UID does not represent caller, you might want to use phone number column instead
         if 'UID' in df_sorted.columns:
-            # shift per UID (previous report by same UID)
             df_sorted['prev_time'] = df_sorted.groupby('UID')['WAKTU LAPOR'].shift(1)
             df_sorted['diff_min'] = (df_sorted['WAKTU LAPOR'] - df_sorted['prev_time']).dt.total_seconds() / 60
             df_sorted['rapid_repeat'] = df_sorted['diff_min'].fillna(99999) <= 2
         else:
             df_sorted['rapid_repeat'] = False
 
-        # ensure boolean columns are actual booleans (no NaN)
+        # ensure boolean cols have no NaN and are bool type
         for col in ['is_ghost_label', 'is_ghost_auto', 'ghost_call', 'prank_call', 'fake_location', 'short_call', 'rapid_repeat']:
             if col in df_sorted.columns:
                 df_sorted[col] = df_sorted[col].fillna(False).astype(bool)
 
-        # final df to return
         df = df_sorted.reset_index(drop=True)
-
         return df, None
 
     except FileNotFoundError as e:
         return None, f"File tidak ditemukan: {e}"
     except Exception as e:
         return None, f"Error saat memuat data: {e}"
+
 
 # Main app
 def main():
@@ -250,6 +254,10 @@ def main():
     if len(df_filtered) == 0:
         st.warning("⚠️ Tidak ada data yang sesuai dengan filter yang dipilih. Silakan ubah filter di sidebar.")
         return
+
+    # ----------------------------------------------------------------
+    # (the rest of your dashboard code is unchanged, only the reading/cleaning above was made robust)
+    # ----------------------------------------------------------------
 
     # Tabs untuk navigasi
     tab1, tab2, tab3, tab4, tab5 = st.tabs([
@@ -329,12 +337,10 @@ def main():
                 fig, ax = plt.subplots(figsize=(10, 6))
                 colors = plt.cm.Set3(range(len(tipe_counts)))
 
-                # Hanya buat pie chart jika ada lebih dari 1 kategori
                 if len(tipe_counts) > 1:
                     ax.pie(tipe_counts.values, labels=tipe_counts.index, autopct='%1.1f%%', colors=colors)
                     ax.set_title('Top 10 Tipe Laporan')
                 else:
-                    # Kalau cuma 1, pakai bar chart aja
                     tipe_counts.plot(kind='bar', ax=ax, color='steelblue')
                     ax.set_xlabel('Tipe Laporan')
                     ax.set_ylabel('Jumlah')
@@ -649,7 +655,6 @@ def main():
                     plt.tight_layout()
                     st.pyplot(fig)
 
-                    # Tabel detail
                     ghost_table = ghost_by_agent.reset_index().rename(columns={'AGENT L1': 'Agent', 0: 'Jumlah Ghost Call'})
                     st.dataframe(ghost_table, width="stretch")
                 else:
@@ -688,5 +693,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
