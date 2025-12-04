@@ -141,40 +141,84 @@ def load_and_process_data(path_2024, path_2025):
         if 'LONGITUDE' in df.columns:
             df['LONGITUDE'] = pd.to_numeric(df['LONGITUDE'], errors='coerce')
 
-        # === DETEKSI GHOST CALL ===
-        df['is_ghost_label'] = False
-        if 'KATEGORI' in df.columns:
-            df['is_ghost_label'] = df['KATEGORI'].astype(str).str.lower().str.contains('ghost', na=False)
+# === DETEKSI GHOST CALL ===
+df['is_ghost_label'] = False
+if 'KATEGORI' in df.columns:
+    df['is_ghost_label'] = df['KATEGORI'].astype(str).str.lower().str.contains('ghost', na=False)
 
-        # Deteksi ghost call otomatis (robust)
-        df['is_ghost_auto'] = False
-        if all(col in df.columns for col in ['LATITUDE', 'LONGITUDE', 'DESKRIPSI']):
-            df['DESKRIPSI'] = df['DESKRIPSI'].astype(str)
-            df['is_ghost_auto'] = (
-                (df['duration_seconds'].fillna(999999) == 0) &
-                (df['DESKRIPSI'].fillna('').str.strip().str.len() < 5) &
-                (df['LATITUDE'].fillna(0) == 0) &
-                (df['LONGITUDE'].fillna(0) == 0)
-            )
+# Deteksi ghost call otomatis
+df['is_ghost_auto'] = False
+if all(col in df.columns for col in ['LATITUDE', 'LONGITUDE', 'DESKRIPSI']):
+    df['DESKRIPSI'] = df['DESKRIPSI'].astype(str)
+    df['is_ghost_auto'] = (
+        (df['duration_seconds'].fillna(999999) == 0) &
+        (df['DESKRIPSI'].fillna('').str.strip().str.len() < 5) &
+        (df['LATITUDE'].fillna(0) == 0) &
+        (df['LONGITUDE'].fillna(0) == 0)
+    )
 
-        df['ghost_call'] = df['is_ghost_label'] | df['is_ghost_auto']
+df['ghost_call'] = df['is_ghost_label'] | df['is_ghost_auto']
 
-        # === DETEKSI PRANK CALL ===
-        df['prank_call'] = df['TIPE LAPORAN'].astype(str).str.lower() == 'prank'
 
-        # === DETEKSI LOKASI PALSU ===
-        df['fake_location'] = False
-        if 'LATITUDE' in df.columns and 'LONGITUDE' in df.columns:
-            df['fake_location'] = (df['LATITUDE'].fillna(0) == 0) & (df['LONGITUDE'].fillna(0) == 0)
+# === DETEKSI PRANK CALL ===
+df['prank_call'] = df['TIPE LAPORAN'].astype(str).str.lower() == 'prank'
 
-        # === DETEKSI SPAM BERULANG ===
-        df_sorted = df.sort_values('WAKTU LAPOR').copy()
-        if 'UID' in df_sorted.columns:
-            df_sorted['prev_time'] = df_sorted.groupby('UID')['WAKTU LAPOR'].shift(1)
-            df_sorted['diff_min'] = (df_sorted['WAKTU LAPOR'] - df_sorted['prev_time']).dt.total_seconds() / 60
-            df_sorted['rapid_repeat'] = df_sorted['diff_min'].fillna(99999) <= 2
-        else:
-            df_sorted['rapid_repeat'] = False
+
+# === DETEKSI LOKASI PALSU ===
+df['fake_location'] = False
+if 'LATITUDE' in df.columns and 'LONGITUDE' in df.columns:
+    df['fake_location'] = (df['LATITUDE'].fillna(0) == 0) & (df['LONGITUDE'].fillna(0) == 0)
+
+
+# === DETEKSI SPAM / REPEAT CALL ===
+df_sorted = df.sort_values('WAKTU LAPOR').copy()
+
+if 'UID' in df_sorted.columns:
+    df_sorted['prev_time'] = df_sorted.groupby('UID')['WAKTU LAPOR'].shift(1)
+    df_sorted['diff_min'] = (df_sorted['WAKTU LAPOR'] - df_sorted['prev_time']).dt.total_seconds() / 60
+    df_sorted['rapid_repeat'] = df_sorted['diff_min'].fillna(99999) <= 2
+else:
+    df_sorted['rapid_repeat'] = False
+
+# mapping kembali hasil repeat_call ke df berdasarkan index
+df['repeat_call'] = df_sorted['rapid_repeat']
+
+
+# === SUMMARY UNTUK DASHBOARD ===
+total_laporan = len(df)
+total_ghost = df['ghost_call'].sum()
+total_prank = df['prank_call'].sum()
+total_short = df['short_call'].sum()
+total_fake = df['fake_location'].sum()
+total_repeat = df['repeat_call'].sum()
+
+
+# === TOP 10 AGENT GHOST CALL ===
+if 'AGENT L1' in df.columns:
+    top_agent_ghost = (
+        df[df['ghost_call']]
+        .groupby('AGENT L1')
+        .size()
+        .reset_index(name='jumlah')
+        .sort_values('jumlah', ascending=False)
+        .head(10)
+    )
+else:
+    top_agent_ghost = pd.DataFrame(columns=['AGENT L1', 'jumlah'])
+
+
+# === TOP 10 AGENT PRANK CALL ===
+if 'AGENT L1' in df.columns:
+    top_agent_prank = (
+        df[df['prank_call']]
+        .groupby('AGENT L1')
+        .size()
+        .reset_index(name='jumlah')
+        .sort_values('jumlah', ascending=False)
+        .head(10)
+    )
+else:
+    top_agent_prank = pd.DataFrame(columns=['AGENT L1', 'jumlah'])
 
         # ensure boolean cols have no NaN and are bool type
         for col in ['is_ghost_label', 'is_ghost_auto', 'ghost_call', 'prank_call', 'fake_location', 'short_call', 'rapid_repeat']:
@@ -693,6 +737,7 @@ def main():
 
 if __name__ == "__main__":
     main()
+
 
 
 
