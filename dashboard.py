@@ -501,15 +501,16 @@ def main():
             
             # Gunakan data ASLI (df), bukan df_filtered
             # Hanya ambil data dengan kecamatan valid (bukan "-" atau NaN)
-            df_valid_kec = df[df['KECAMATAN'].notna() & (df['KECAMATAN'] != '-')].copy()
+            df_valid_kec = df[(df['KECAMATAN'].notna()) & (df['KECAMATAN'] != '-')].copy()
             
             if len(df_valid_kec) > 0:
+                # Agregasi per kecamatan
                 kecamatan_detail = df_valid_kec.groupby('KECAMATAN').agg({
                     'UID': 'count',
-                    'ghost_call': 'sum',
-                    'prank_call': 'sum',
-                    'short_call': 'sum',
-                    'fake_location': 'sum'
+                    'ghost_call': lambda x: (x == True).sum(),  # Hitung True value
+                    'prank_call': lambda x: (x == True).sum(),
+                    'short_call': lambda x: (x == True).sum(),
+                    'fake_location': lambda x: (x == True).sum()
                 }).rename(columns={
                     'UID': 'Total Laporan',
                     'ghost_call': 'Ghost Calls',
@@ -518,11 +519,13 @@ def main():
                     'fake_location': 'Lokasi Palsu'
                 }).sort_values('Total Laporan', ascending=False).head(20)
                 
-                # Convert to int
-                for col in ['Ghost Calls', 'Prank Calls', 'Short Calls', 'Lokasi Palsu']:
-                    kecamatan_detail[col] = kecamatan_detail[col].astype(int)
+                # Convert to int untuk display yang lebih bersih
+                kecamatan_detail = kecamatan_detail.astype(int)
                 
                 st.dataframe(kecamatan_detail, use_container_width=True)
+                
+                # Info tambahan
+                st.info(f"ℹ️ **Catatan:** Tabel ini menampilkan data dari kecamatan yang memiliki lokasi valid. Ghost/Prank call ({int(df['ghost_call'].sum())} ghost + {int(df['prank_call'].sum())} prank) tidak memiliki data kecamatan sehingga tidak muncul di tabel ini.")
             else:
                 st.info("Tidak ada data kecamatan yang valid.")
         
