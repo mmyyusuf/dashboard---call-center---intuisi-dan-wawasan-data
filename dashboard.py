@@ -177,15 +177,18 @@ def main():
     if 'KATEGORI' in df.columns:
         # Ambil kategori unik dan filter yang bukan "-" atau kosong
         all_categories = df['KATEGORI'].fillna('-').unique()
-        categories = sorted([c for c in all_categories if c not in ['-', '', 'nan']])
+        valid_categories = sorted([c for c in all_categories if c not in ['-', '', 'nan']])
+        
+        # Tambahkan opsi untuk data tanpa kategori (ghost/prank)
+        category_options = ['[Tanpa Kategori (Ghost/Prank)]'] + valid_categories
         
         # Jika ada kategori valid, tampilkan filter
-        if len(categories) > 0:
+        if len(valid_categories) > 0:
             selected_categories = st.sidebar.multiselect(
                 "Pilih Kategori (opsional)", 
-                categories,
+                category_options,
                 default=[],  # Default kosong = tampilkan semua
-                help="Kosongkan untuk melihat semua data termasuk ghost/prank"
+                help="Pilih '[Tanpa Kategori]' untuk ghost/prank, kosongkan untuk semua data"
             )
         else:
             selected_categories = []
@@ -197,14 +200,17 @@ def main():
         # Ambil kecamatan yang valid (bukan "-" atau NaN)
         valid_kecamatans = df['KECAMATAN'].dropna()
         valid_kecamatans = valid_kecamatans[valid_kecamatans != '-']
-        kecamatans = sorted(valid_kecamatans.unique())
+        kecamatans_list = sorted(valid_kecamatans.unique())
         
-        if len(kecamatans) > 0:
+        # Tambahkan opsi untuk data tanpa kecamatan
+        kecamatan_options = ['[Tanpa Lokasi (Ghost/Prank)]'] + kecamatans_list
+        
+        if len(kecamatans_list) > 0:
             selected_kecamatans = st.sidebar.multiselect(
                 "Pilih Kecamatan (opsional)", 
-                kecamatans,
+                kecamatan_options,
                 default=[],  # Default kosong = tampilkan semua
-                help="Kosongkan untuk melihat semua data termasuk yang tanpa lokasi"
+                help="Pilih '[Tanpa Lokasi]' untuk ghost/prank, kosongkan untuk semua data"
             )
         else:
             selected_kecamatans = []
@@ -217,13 +223,35 @@ def main():
     if selected_years:
         df_filtered = df_filtered[df_filtered['source'].isin(selected_years)]
     
-    # Filter kategori hanya jika user memilih kategori tertentu
+    # Filter kategori
     if selected_categories and len(selected_categories) > 0:
-        df_filtered = df_filtered[df_filtered['KATEGORI'].isin(selected_categories)]
+        # Jika user pilih "[Tanpa Kategori]", ambil data dengan kategori "-"
+        if '[Tanpa Kategori (Ghost/Prank)]' in selected_categories:
+            # Ambil kategori normal yang dipilih
+            normal_cats = [c for c in selected_categories if c != '[Tanpa Kategori (Ghost/Prank)]']
+            # Filter: kategori "-" ATAU kategori yang dipilih
+            df_filtered = df_filtered[
+                (df_filtered['KATEGORI'].isin(['-', '']) | df_filtered['KATEGORI'].isna()) | 
+                (df_filtered['KATEGORI'].isin(normal_cats))
+            ]
+        else:
+            # Filter normal
+            df_filtered = df_filtered[df_filtered['KATEGORI'].isin(selected_categories)]
     
-    # Filter kecamatan hanya jika user memilih kecamatan tertentu
+    # Filter kecamatan
     if selected_kecamatans and len(selected_kecamatans) > 0:
-        df_filtered = df_filtered[df_filtered['KECAMATAN'].isin(selected_kecamatans)]
+        # Jika user pilih "[Tanpa Lokasi]", ambil data dengan kecamatan "-"
+        if '[Tanpa Lokasi (Ghost/Prank)]' in selected_kecamatans:
+            # Ambil kecamatan normal yang dipilih
+            normal_kecs = [k for k in selected_kecamatans if k != '[Tanpa Lokasi (Ghost/Prank)]']
+            # Filter: kecamatan "-" ATAU kecamatan yang dipilih
+            df_filtered = df_filtered[
+                (df_filtered['KECAMATAN'].isin(['-', '']) | df_filtered['KECAMATAN'].isna()) | 
+                (df_filtered['KECAMATAN'].isin(normal_kecs))
+            ]
+        else:
+            # Filter normal
+            df_filtered = df_filtered[df_filtered['KECAMATAN'].isin(selected_kecamatans)]
     
     # Warning jika data kosong setelah filter
     if len(df_filtered) == 0:
@@ -468,27 +496,35 @@ def main():
             
             st.markdown("---")
             
-            # Tabel Detail per Kecamatan
-            st.subheader("📋 Detail Laporan per Kecamatan")
-            kecamatan_detail = df_filtered.groupby('KECAMATAN').agg({
-                'UID': 'count',
-                'ghost_call': 'sum',
-                'prank_call': 'sum',
-                'short_call': 'sum',
-                'fake_location': 'sum'
-            }).rename(columns={
-                'UID': 'Total Laporan',
-                'ghost_call': 'Ghost Calls',
-                'prank_call': 'Prank Calls',
-                'short_call': 'Short Calls',
-                'fake_location': 'Lokasi Palsu'
-            }).sort_values('Total Laporan', ascending=False).head(20)
+            # Tabel Detail per Kecamatan - TAMPILKAN SEMUA (tidak tergantung filter)
+            st.subheader("📋 Detail Laporan per Kecamatan (Top 20)")
             
-            # Convert to int
-            for col in ['Ghost Calls', 'Prank Calls', 'Short Calls', 'Lokasi Palsu']:
-                kecamatan_detail[col] = kecamatan_detail[col].astype(int)
+            # Gunakan data ASLI (df), bukan df_filtered
+            # Hanya ambil data dengan kecamatan valid (bukan "-" atau NaN)
+            df_valid_kec = df[df['KECAMATAN'].notna() & (df['KECAMATAN'] != '-')].copy()
             
-            st.dataframe(kecamatan_detail, use_container_width=True)
+            if len(df_valid_kec) > 0:
+                kecamatan_detail = df_valid_kec.groupby('KECAMATAN').agg({
+                    'UID': 'count',
+                    'ghost_call': 'sum',
+                    'prank_call': 'sum',
+                    'short_call': 'sum',
+                    'fake_location': 'sum'
+                }).rename(columns={
+                    'UID': 'Total Laporan',
+                    'ghost_call': 'Ghost Calls',
+                    'prank_call': 'Prank Calls',
+                    'short_call': 'Short Calls',
+                    'fake_location': 'Lokasi Palsu'
+                }).sort_values('Total Laporan', ascending=False).head(20)
+                
+                # Convert to int
+                for col in ['Ghost Calls', 'Prank Calls', 'Short Calls', 'Lokasi Palsu']:
+                    kecamatan_detail[col] = kecamatan_detail[col].astype(int)
+                
+                st.dataframe(kecamatan_detail, use_container_width=True)
+            else:
+                st.info("Tidak ada data kecamatan yang valid.")
         
         st.markdown("---")
         
