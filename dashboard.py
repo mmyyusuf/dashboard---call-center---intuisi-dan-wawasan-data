@@ -524,8 +524,36 @@ def main():
                 
                 st.dataframe(kecamatan_detail, use_container_width=True)
                 
-                # Info tambahan
-                st.info(f"ℹ️ **Catatan:** Tabel ini menampilkan data dari kecamatan yang memiliki lokasi valid. Ghost/Prank call ({int(df['ghost_call'].sum())} ghost + {int(df['prank_call'].sum())} prank) tidak memiliki data kecamatan sehingga tidak muncul di tabel ini.")
+                # Info tambahan dengan styling
+                st.markdown("---")
+                st.markdown("### ℹ️ Penjelasan Kolom Tabel")
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.markdown("""
+                    **📍 Ghost Calls & Prank Calls:**
+                    - Angka 0 karena ghost/prank **tidak memiliki data kecamatan**
+                    - Semua 16,097 ghost call: kecamatan = "-"
+                    - Semua 40,456 prank call: kecamatan = "-"
+                    - Lihat detail ghost/prank di Tab **"⚠️ Ghost & Prank Call"**
+                    """)
+                
+                with col2:
+                    st.markdown("""
+                    **⏱️ Short Calls & Lokasi Palsu:**
+                    - **Short Calls**: Laporan dengan durasi ≤5 detik dari kecamatan ini
+                    - **Lokasi Palsu**: Laporan dengan GPS = (0,0) dari kecamatan ini
+                    - Jika 0 = semua laporan di kecamatan ini punya durasi normal & GPS valid
+                    """)
+                
+                # Ringkasan ghost/prank
+                st.info(f"""
+                📊 **Data Tanpa Lokasi (Tidak Masuk Tabel):**  
+                • Ghost Calls: {int(df['ghost_call'].sum()):,} laporan (kecamatan: -)  
+                • Prank Calls: {int(df['prank_call'].sum()):,} laporan (kecamatan: -)  
+                • Total: {int(df['ghost_call'].sum()) + int(df['prank_call'].sum()):,} laporan tanpa data lokasi
+                """)
             else:
                 st.info("Tidak ada data kecamatan yang valid.")
         
