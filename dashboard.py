@@ -194,13 +194,20 @@ def main():
     
     # Filter kecamatan
     if 'KECAMATAN' in df.columns:
-        kecamatans = sorted(df['KECAMATAN'].dropna().unique())
-        selected_kecamatans = st.sidebar.multiselect(
-            "Pilih Kecamatan", 
-            kecamatans, 
-            default=kecamatans,
-            help="Pilih satu atau lebih kecamatan"
-        )
+        # Ambil kecamatan yang valid (bukan "-" atau NaN)
+        valid_kecamatans = df['KECAMATAN'].dropna()
+        valid_kecamatans = valid_kecamatans[valid_kecamatans != '-']
+        kecamatans = sorted(valid_kecamatans.unique())
+        
+        if len(kecamatans) > 0:
+            selected_kecamatans = st.sidebar.multiselect(
+                "Pilih Kecamatan (opsional)", 
+                kecamatans,
+                default=[],  # Default kosong = tampilkan semua
+                help="Kosongkan untuk melihat semua data termasuk yang tanpa lokasi"
+            )
+        else:
+            selected_kecamatans = []
     else:
         selected_kecamatans = []
     
@@ -214,7 +221,8 @@ def main():
     if selected_categories and len(selected_categories) > 0:
         df_filtered = df_filtered[df_filtered['KATEGORI'].isin(selected_categories)]
     
-    if selected_kecamatans and 'KECAMATAN' in df.columns:
+    # Filter kecamatan hanya jika user memilih kecamatan tertentu
+    if selected_kecamatans and len(selected_kecamatans) > 0:
         df_filtered = df_filtered[df_filtered['KECAMATAN'].isin(selected_kecamatans)]
     
     # Warning jika data kosong setelah filter
