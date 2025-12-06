@@ -173,15 +173,22 @@ def main():
     years = sorted(df['source'].unique())
     selected_years = st.sidebar.multiselect("Pilih Tahun", years, default=years)
     
-    # Filter kategori
+    # Filter kategori (exclude "-" yang biasanya untuk ghost/prank)
     if 'KATEGORI' in df.columns:
-        categories = sorted(df['KATEGORI'].dropna().unique())
-        selected_categories = st.sidebar.multiselect(
-            "Pilih Kategori", 
-            categories, 
-            default=categories,
-            help="Pilih satu atau lebih kategori"
-        )
+        # Ambil kategori unik dan filter yang bukan "-" atau kosong
+        all_categories = df['KATEGORI'].fillna('-').unique()
+        categories = sorted([c for c in all_categories if c not in ['-', '', 'nan']])
+        
+        # Jika ada kategori valid, tampilkan filter
+        if len(categories) > 0:
+            selected_categories = st.sidebar.multiselect(
+                "Pilih Kategori (opsional)", 
+                categories,
+                default=[],  # Default kosong = tampilkan semua
+                help="Kosongkan untuk melihat semua data termasuk ghost/prank"
+            )
+        else:
+            selected_categories = []
     else:
         selected_categories = []
     
@@ -203,7 +210,8 @@ def main():
     if selected_years:
         df_filtered = df_filtered[df_filtered['source'].isin(selected_years)]
     
-    if selected_categories and 'KATEGORI' in df.columns:
+    # Filter kategori hanya jika user memilih kategori tertentu
+    if selected_categories and len(selected_categories) > 0:
         df_filtered = df_filtered[df_filtered['KATEGORI'].isin(selected_categories)]
     
     if selected_kecamatans and 'KECAMATAN' in df.columns:
